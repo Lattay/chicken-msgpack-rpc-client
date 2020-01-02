@@ -1,0 +1,11 @@
+((license "MIT")
+ (category network)
+ (dependencies msgpack)
+ (test-dependencies test)
+ (author "Théo Cavignac")
+ (version "0.2.0")
+ (synopsis "Client for the msgpackRPC protocol for CHICKEN")
+ (components 
+    (extension msgpackrpc-client
+      (source "src/msgpackrpc.scm")
+      (modules msgpackrpc-client))))
