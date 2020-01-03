@@ -6,12 +6,14 @@ It aims at providing an Lispy interface to this protocol with support of asyncro
 
 # Features
 
-- [ ] Syncronous requests
-- [ ] Asyncronous notifications
-- [ ] Asyncronous requests
-- [ ] thread-safe operations
-- [ ] server-to-client single-threaded requests
-- [ ] server-to-client multi-threaded requests
+- [x] Syncronous requests
+- [x] Async single-threaded callback based requests
+- [x] Async single-threaded promise based requests
+- [x] Async multi-threaded callback based requests
+- [x] Async multi-threaded promise based requests
+- [x] notifications
+- [x] thread-safe operations
+- [x] server-to-client requests and notifications
 - [ ] transport over TCP/IPv4
 - [ ] transport over TCP/IPv6
 - [ ] transport over UDP/IPv4
