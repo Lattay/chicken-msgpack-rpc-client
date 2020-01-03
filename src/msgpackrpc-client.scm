@@ -64,7 +64,7 @@
            (bind
              (lambda (method-name method)
                (alist-set! method-name method method-table)))
-           (listen  ; TODO quand ça doit être appelé ??
+           (listen
              (lambda ()
                (if (and
                      (input-port-open? in)
@@ -139,11 +139,17 @@
                 (let-values (((l-in l-out) (tcp-connect host port)))
                   (set! in l-in)
                   (set! out l-out))))))
-         ((unix)
-          (assert (= (length args) 1))
-          )
          ((file)
-          ))
+          )
+         ((extend)
+          (assert (= (length args) 1))
+          (set! connect
+            (lambda ()
+              (let-values (((l-in l-out) ((car args))))
+                (set! in l-in)
+                (set! out l-out)))))
+         (else
+           (error "Unsupported transport mode.")))
        (lambda (method)
          (case method
            ((is-mrpc-client) #t)
