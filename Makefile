@@ -10,7 +10,7 @@ endif
 
 CSC_OPTIONS=
 
-.PHONY: all unit test clean
+.PHONY: all unit test integration clean
 
 all: msgpackrpc.so
 
@@ -24,6 +24,7 @@ help:
 	@echo "  Test targets:"
 	@echo "    test                   proceed to all tests"
 	@echo "    unit                   unit testing of server and client"
+	@echo "    integration            integration testing of server and client (depends on Python components)"
 	@echo ""
 	@echo "  Lib targets:"
 	@echo ""
@@ -33,14 +34,18 @@ help:
 
 # Development test
 
-test: unit
+test: integration unit
 
 unit:
+
+integration: test/tests.scm
+	$(CSC) $(CSC_OPTIONS) $< -o run-test
+	./run-test
 
 msgpack-rpc.so: $(SRC)
 	$(CSC) $(CSC_OPTIONS) -s -j msgpackrpc-client -o $@ $<
 	$(CSC) $(CSC_OPTIONS) msgpackrpc-client.import.scm -dynamic
 
 clean:
-	rm -f test/*.o *.o run unit-* *.c test/*.c *.so *.import.scm test/run src/*.c src/*.so
+	rm -f test/*.o *.o run-test unit-* *.c test/*.c *.so *.import.scm src/*.c src/*.so
 	rm -f *.*.sh *.link
