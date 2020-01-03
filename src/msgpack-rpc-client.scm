@@ -1,6 +1,6 @@
 (include "mrpc-protocol.scm")
 
-(module msgpackrpc-client (*wait-cycle-length*
+(module msgpack-rpc-client (*wait-cycle-length*
                            *multi-thread*
 
                            make-mrpc-client

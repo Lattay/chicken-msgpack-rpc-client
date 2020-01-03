@@ -6,6 +6,6 @@
  (version "0.2.0")
  (synopsis "Client for the msgpackRPC protocol for CHICKEN")
  (components 
-    (extension msgpackrpc-client
-      (source "src/msgpackrpc.scm")
-      (modules msgpackrpc-client))))
+    (extension msgpack-rpc-client
+      (source "src/msgpack-rpc.scm")
+      (modules msgpack-rpc-client))))

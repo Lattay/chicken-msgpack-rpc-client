@@ -2,8 +2,8 @@
 (import chicken.process
         chicken.random)
 
-(load "msgpackrpc-client.so")
-(import msgpackrpc-client)
+(load "msgpack-rpc-client.so")
+(import msgpack-rpc-client)
 
 (define tcp-port (+ 9000 (pseudo-random-integer 999)))
 
