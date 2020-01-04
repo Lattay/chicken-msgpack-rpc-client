@@ -2,7 +2,7 @@
 *.o
 *.c
 *.import.scm
-run
+run-test
 unit-*
 *.sh
 *.link

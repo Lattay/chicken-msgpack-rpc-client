@@ -1,7 +1,7 @@
 (import srfi-18)
 
 (define (timestamp)
-  (time->second (current-time)))
+  (time->seconds (current-time)))
   
 (define (sleep-til! time)
   (thread-sleep! (- time (timestamp))))

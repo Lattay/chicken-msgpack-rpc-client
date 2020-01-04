@@ -12,7 +12,7 @@ CSC_OPTIONS=
 
 .PHONY: all unit test integration clean
 
-all: msgpack-rpc.so
+all: msgpack-rpc-client.so
 
 install: all
 	chicken-install
@@ -38,11 +38,11 @@ test: integration unit
 
 unit:
 
-integration: test/tests.scm
+integration: test/tests.scm msgpack-rpc-client.so
 	$(CSC) $(CSC_OPTIONS) $< -o run-test
 	./run-test
 
-msgpack-rpc.so: src/msgpack-rpc-client.scm
+msgpack-rpc-client.so: src/msgpack-rpc-client.scm
 	$(CSC) $(CSC_OPTIONS) -s -j msgpack-rpc-client -o $@ $<
 	$(CSC) $(CSC_OPTIONS) msgpack-rpc-client.import.scm -dynamic
 

@@ -2,10 +2,15 @@
 (import chicken.process
         chicken.random)
 
+(import srfi-18)
+
 (load "msgpack-rpc-client.so")
 (import msgpack-rpc-client)
 
 (define tcp-port (+ 9000 (pseudo-random-integer 999)))
+(display "port used ")
+(display tcp-port)
+(newline)
 
 (define (pythoncmd . args)
   (process-run (foldl (lambda (l r) (string-append l " " r)) "python3" args)))
@@ -13,7 +18,8 @@
 (define (start-external-server mode . args)
   (case mode
     ((tcp)
-     (pythoncmd "./tcp-mpack-server.py" tcp-port))
+     (let ((pid (pythoncmd "test/tcp-mpack-server.py" (number->string tcp-port))))
+       (lambda () (process-run (string-append "kill -15 " (number->string pid))))))
     (else
       (error "Not implemented yet."))))
 
@@ -21,24 +27,40 @@
   (test-group "initialization"
     (test "tcp params" #t
           (mrpc-client?  (make-mrpc-client 'tcp "localhost" tcp-port)))
-    (test "unix port params" #t
-          (mrpc-client? (make-mrpc-client 'unix "/tmp/mrpc-port")))
-    (test "file IO params" #t
-          (mrpc-client? (make-mrpc-client 'file "/tmp/mrpc-io-file"))))
+    ; (test "file IO params" #t
+    ;       (mrpc-client? (make-mrpc-client 'file "/tmp/mrpc-io-file")))
+    )
 
   (test-group "tcp usage"
     (define stop-srv (start-external-server 'tcp "localhost" tcp-port))
+    (sleep 1)
     (define client (make-mrpc-client 'tcp "localhost" tcp-port))
-    (test "connect" #t (mrpc-connect client))
-    (test "call" 46 (mrpc-call client "prod" 6 7))
+    (test "connect" #t (mrpc-connect! client))
+    (test "call" '(success . 46) (mrpc-call! client "sum" 36 10))
     (test-group "async call with promise"
-      (let ((promise (mrpc-async-call client "prod" 6 7 #f)))
-        (test "promise" (mrpc-promise? promise))
-        (test "result" (mrpc-wait promise))))
+      (let ((promise (mrpc-async-call! client "prod" 6 7 #f)))
+        (test "result" '(success . 42) (mrpc-wait! promise))))
     (test-group "async call with callback"
-      (let ((param (let ((val #f) (lambda args (if (null? args) val (set! val (car args))))))))
-        (test "call" (mrpc-async-call client "prod" 6 7 (lambda (res) 
+      (test "single thread call" 55
+            (let ((val #f))
+              (let ((prom (mrpc-async-call! client "prod" 11 5
+                                            (lambda (res err)
+                                              (if err
+                                                  (set! val err)
+                                                  (set! val res))))))
+                (mrpc-wait! prom)
+                val)))
+      (*multi-thread* #t)
+      (test "multiple thread call" 55
+            (let ((val #f))
+              (let ((prom (mrpc-async-call! client "prod" 11 5
+                                            (lambda (res err)
+                                              (if err
+                                                  (set! val err)
+                                                  (set! val res))))))
+                (thread-sleep! 0.5)
+                val)))
+      )
 
-                (stop-srv)
-
-     
+    (stop-srv))
+  )
