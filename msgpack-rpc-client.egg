@@ -7,5 +7,5 @@
  (synopsis "Client for the msgpackRPC protocol for CHICKEN")
  (components 
     (extension msgpack-rpc-client
-      (source "src/msgpack-rpc.scm")
+      (source "src/msgpack-rpc-client.scm")
       (modules msgpack-rpc-client))))
