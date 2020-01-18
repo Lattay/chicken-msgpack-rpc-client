@@ -36,10 +36,10 @@
     (sleep 1)
     (define client (make-mrpc-client 'tcp "localhost" tcp-port))
     (test "connect" #t (mrpc-connect! client))
-    (test "call" '(success . 46) (mrpc-call! client "sum" 36 10))
+    (test "call" 46 (mrpc-call! client "sum" 36 10))
     (test-group "async call with promise"
       (let ((promise (mrpc-async-call! client "prod" 6 7 #f)))
-        (test "result" '(success . 42) (mrpc-wait! promise))))
+        (test "result" 42 (mrpc-wait! promise))))
     (test-group "async call with callback"
       (test "single thread call" 55
             (let ((val #f))

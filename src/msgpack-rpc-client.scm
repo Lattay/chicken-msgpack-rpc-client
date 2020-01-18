@@ -23,9 +23,13 @@
          srfi-69)
 
  (include "src/thread-tools.scm")
- (include "src/list-tools.scm")
 
  (import (prefix mrpc-protocol mrpc:))
+
+ (define-syntax alist-set!
+   (syntax-rules ()
+     ((_ alist key val)
+      (set! alist (alist-cons key val alist)))))
 
  (define *wait-cycle-length* (make-parameter 0.05))
  (define *multi-thread* (make-parameter #f))
@@ -143,7 +147,7 @@
                        (mutex-unlock! method-call-stack)
                        (let ((res #f) (err #f))
                          (condition-case
-                           (set! res (apply (hash-table-ref method-table (first req) #f)
+                           (set! res (apply (hash-table-ref method-table (first req))
                                             (second req)))
                            (e ()
                               (set! err (serialize-exception e))))
@@ -268,8 +272,8 @@
                (thread
                  (make-thread (lambda ()
                                 (let-values (((lresult lstatus) (%mrpc-wait! client key)))
-                                  (set! status stat)
-                                  (set! result res))))))
+                                  (set! status lstatus)
+                                  (set! result lresult))))))
           (thread-start! thread)
           (delay (begin
                    (thread-join! thread)
@@ -318,4 +322,23 @@
              #f
              (mrpc-client-listen! client (- timeout elapsed))))
        #t)))
+
+ ;; Mostly unrelated but useful. Recursively convert all hash-tables to alist
+ ;; and vectors to list so that message can be easily displayed and browsed.
+ (define (untangle-msg thing)
+  (cond
+    ((hash-table? thing)
+     (let loop ((rest (hash-table->alist thing)) (acc '()))
+       (if (null? rest)
+           (reverse acc)
+           (loop (cdr rest) (cons (cons (caar rest) (untangle-msg (cdar rest))) acc)))))
+    ((list? thing)
+     (let loop ((rest thing) (acc '()))
+       (if (null? rest)
+           (reverse acc)
+           (loop (cdr rest) (cons (untangle-msg (car rest)) acc)))))
+    ((vector? thing)
+     (untangle-msg (vector->list thing)))
+    (else
+      thing)))
  )
