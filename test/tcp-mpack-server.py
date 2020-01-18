@@ -19,6 +19,15 @@ class MyServicer:
     async def prod(self, x, y):
         return x * y
 
+    async def answer(self):
+        return 42
+
+    async def i_dont_know(self, a, b, c):
+        return None
+
+    async def dont_call_me(self):
+        raise Exception('Don\'t call me !')
+
 
 async def main():
     try:

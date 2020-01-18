@@ -61,6 +61,16 @@
                 (thread-sleep! 0.5)
                 val)))
       )
+    (test-group "edge cases"
+      (test "empty arg list" 42 (mrpc-call! client "answer"))
+      (test "null result" '() (mrpc-call! client "i_dont_know" 1 2 3))
+      (test "call raise error" 'error
+            (let-values (((result status) (mrpc-call! client "dont_call_me" 1 2 3)))
+              status))
+      (test "method does not exist" 'error
+            (let-values (((result status) (mrpc-call! client "does_not_exists" 3)))
+              status))
+      )
 
     (stop-srv))
   )
