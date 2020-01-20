@@ -13,6 +13,8 @@
                            mrpc-notify!
                            mrpc-bind!
                            mrpc-client-listen!
+
+                           untangle-msg
                            )
  (import scheme
          chicken.base
