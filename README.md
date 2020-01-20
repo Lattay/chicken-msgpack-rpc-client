@@ -21,3 +21,12 @@ It aims at providing an Lispy interface to this protocol with support of asyncro
     - [ ] transport
     - [ ] client-to-server
     - [ ] server-to-client
+
+# Building and testing
+
+For development building and testing is done through a `make`.
+`make` build everything.
+`make test` run tests.
+
+Beware that testing is done against the [aio-msgpack-rpc](https://pypi.org/project/aio-msgpack-rpc) python module.
+You must insttall it before running the test suite.
