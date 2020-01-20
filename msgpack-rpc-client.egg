@@ -3,7 +3,7 @@
  (dependencies msgpack)
  (test-dependencies test)
  (author "Théo Cavignac")
- (version "0.2.0")
+ (version "0.1.1")
  (synopsis "Client for the msgpackRPC protocol for CHICKEN")
  (components 
     (extension msgpack-rpc-client

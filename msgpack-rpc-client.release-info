@@ -1,3 +1,4 @@
 (repo git "git://github.com/lattay/chicken-msgpack-rpc-client.git")
 (uri targz "https://github.com/Lattay/chicken-msgpack-rpc-client/archive/v{egg-release}.tar.gz")
 (release "0.1.0")
+(release "0.1.1")
