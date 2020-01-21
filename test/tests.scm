@@ -5,7 +5,7 @@
 (import srfi-18)
 
 (load "msgpack-rpc-client.so")
-(import msgpack-rpc-client)
+(import (prefix msgpack-rpc-client mrpc-))
 
 (define tcp-port (+ 9000 (pseudo-random-integer 999)))
 (display "port used ")
@@ -26,15 +26,15 @@
 (test-group "Integration tests"
   (test-group "initialization"
     (test "tcp params" #t
-          (mrpc-client?  (make-mrpc-client 'tcp "localhost" tcp-port)))
+          (mrpc-client?  (mrpc-make-client 'tcp "localhost" tcp-port)))
     ; (test "file IO params" #t
-    ;       (mrpc-client? (make-mrpc-client 'file "/tmp/mrpc-io-file")))
+    ;       (mrpc-client? (make-client 'file "/tmp/mrpc-io-file")))
     )
 
   (test-group "tcp usage"
     (define stop-srv (start-external-server 'tcp "localhost" tcp-port))
     (sleep 1)
-    (define client (make-mrpc-client 'tcp "localhost" tcp-port))
+    (define client (mrpc-make-client 'tcp "localhost" tcp-port))
     (test "connect" #t (mrpc-connect! client))
     (test "call" 46 (mrpc-call! client "sum" 36 10))
     (test-group "async call with promise"

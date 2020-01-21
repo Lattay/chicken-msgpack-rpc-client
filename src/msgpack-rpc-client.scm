@@ -3,16 +3,16 @@
 (module msgpack-rpc-client (*wait-cycle-length*
                            *multi-thread*
 
-                           make-mrpc-client
-                           mrpc-client?
-                           mrpc-connect!
-                           mrpc-close!
-                           mrpc-call!
-                           mrpc-async-call!
-                           mrpc-wait!
-                           mrpc-notify!
-                           mrpc-bind!
-                           mrpc-client-listen!
+                           make-client
+                           client?
+                           connect!
+                           close!
+                           call!
+                           async-call!
+                           wait!
+                           notify!
+                           bind!
+                           client-listen!
 
                            untangle-msg
                            )
@@ -40,7 +40,7 @@
    ; TODO
    (list "error" "error serialization not implemented yet"))
 
- (define (make-mrpc-client mode . args)
+ (define (make-client mode . args)
    (let ((in #f)
          (in-lock (make-mutex))
          (out #f)
@@ -196,57 +196,57 @@
 
 
  ;; internal "read all incoming messages"
- (define (%mrpc-read-all! client)
+ (define (%read-all! client)
    (when ((client 'listen))  ; messages incoming
-     (%mrpc-read-all! client)))
+     (%read-all! client)))
  
  ;; internal async call
- (define (%mrpc-call! client mode method args)
-   (%mrpc-read-all! client)
+ (define (%call! client mode method args)
+   (%read-all! client)
    ((client 'call) mode method args))
 
  ;; internal wait
- (define (%mrpc-wait! client key #!optional (timeout -1))
+ (define (%wait! client key #!optional (timeout -1))
    (let ((res ((client 'wait) key timeout)))
      (values (cdr res) (car res))))
 
  ;; client predicate
- (define (mrpc-client? client)
+ (define (client? client)
    (and
      (procedure? client)
      (client 'is-mrpc-client)))
 
  ;; connect to the server
- (define (mrpc-connect! client)
-   (assert (mrpc-client? client))
+ (define (connect! client)
+   (assert (client? client))
    ((client 'connect)))
 
  ;; close the connection
- (define (mrpc-close! client)
-   (assert (mrpc-client? client))
+ (define (close! client)
+   (assert (client? client))
    ((client 'close)))
 
  ;; synchronously call a remote method and return the result
- (define (mrpc-call! client method . args)
-   (assert (mrpc-client? client))
-   (%mrpc-wait! client (%mrpc-call! client 'request method args)))
+ (define (call! client method . args)
+   (assert (client? client))
+   (%wait! client (%call! client 'request method args)))
 
  ;; Asyncronously call a remote method.
  ;; The last argument can be a either a callback procedure or #f.
- ;; It return an object to be waited with mrpc-wait.
+ ;; It return an object to be waited with wait.
  ;; The callback must be a two argument procedure: the result and the error object
  ;; if no error occured the error object is #f.
- ;; In any case mrpc-wait will return #f for a callback based request.
- ;; If #f is provided instead of a callback, mrpc-async-call return a Chicken promise.
- ;; The promise have to be waited with mrpc-wait to retrieve the request result.
+ ;; In any case wait will return #f for a callback based request.
+ ;; If #f is provided instead of a callback, async-call return a Chicken promise.
+ ;; The promise have to be waited with wait to retrieve the request result.
  ;; If *multi-thread* is #t the server response is treated as soon as possible.
- ;; If it is #f the server response is treated when mrpc-wait is called.
- (define (mrpc-async-call! client method . args)
-   (assert (mrpc-client? client))
+ ;; If it is #f the server response is treated when wait is called.
+ (define (async-call! client method . args)
+   (assert (client? client))
    (let* ((rargs (reverse args))
           (cb (car rargs))
           (args (reverse (cdr rargs)))
-          (key (%mrpc-call! client 'request method args)))
+          (key (%call! client 'request method args)))
      (assert (or (not cb) (procedure? cb)) "Last argument must be either #f or a procedure.")
      (cond
        ; callback + multithread
@@ -254,7 +254,7 @@
         (let ((thread
                 (make-thread
                   (lambda ()
-                    (let-values (((result status) (%mrpc-wait! client key)))
+                    (let-values (((result status) (%wait! client key)))
                       (if (eq? status 'error)
                           (cb #f result)
                           (cb result #f)))))))
@@ -263,7 +263,7 @@
        ; callback + singlethread
        ((and cb (not (*multi-thread*)))
         (lambda ()
-          (let-values (((result status) (%mrpc-wait! client key)))
+          (let-values (((result status) (%wait! client key)))
             (if (eq? status 'error)
                 (cb #f result)
                 (cb result #f)))))
@@ -273,7 +273,7 @@
                (result #f)
                (thread
                  (make-thread (lambda ()
-                                (let-values (((lresult lstatus) (%mrpc-wait! client key)))
+                                (let-values (((lresult lstatus) (%wait! client key)))
                                   (set! status lstatus)
                                   (set! result lresult))))))
           (thread-start! thread)
@@ -282,17 +282,17 @@
                    (values result status)))))
        ; promise + singlethread
        ((and (not cb) (not (*multi-thread*)))
-        (delay (%mrpc-wait! client key))))))
+        (delay (%wait! client key))))))
 
  ;; Block until the completion of a request and eventually return the result
- ;; argument is the return value of mrpc-async-call and can be:
+ ;; argument is the return value of async-call and can be:
  ;; - a Chicken promise to be forced (promise based call)
  ;; - a started SRFI-18 thread to be joined (callback based call)
  ;; - a standard thunk to be called (callback based call)
  ;; Anything else cause an error.
  ;; Result is returned only from promise based requests.
  ;; #f is returned for callback based requests.
- (define (mrpc-wait! to-wait)
+ (define (wait! to-wait)
    (cond
      ((promise? to-wait) (force to-wait))
      ; callback based call:
@@ -300,13 +300,13 @@
      ((procedure? to-wait) (to-wait) (values #f #f))
      (else (error "Not a valid to-be-waited object."))))
 
- (define (mrpc-notify! client method . args)
-   (assert (mrpc-client? client))
-   (%mrpc-call! client 'notification method args))
+ (define (notify! client method . args)
+   (assert (client? client))
+   (%call! client 'notification method args))
 
  ;; bind a procedure to a method-name to be called by server
  ;; any uncaught error will be reported to the server
- (define (mrpc-bind! client method-name method)
+ (define (bind! client method-name method)
    ((client 'bind) method-name method))
 
  ;; block the current thread to treat server-to-client requests and return when
@@ -314,15 +314,15 @@
  ;; (optional, default 0) ; are elapsed
  ;; If timeout is 0, treat one waiting request (if any) and return
  ;; return #f if stopped from timeout and #f if stopped from exaustion
- (define (mrpc-client-listen! client #!optional (timeout 0))
+ (define (client-listen! client #!optional (timeout 0))
    (let ((start (timestamp)))
-     (%mrpc-read-all! client)
+     (%read-all! client)
      (if ((client 'listen))
        (let ((elapsed (- (timestamp) start)))
          (if (and (> timeout 0)
                   (> elapsed timeout))
              #f
-             (mrpc-client-listen! client (- timeout elapsed))))
+             (client-listen! client (- timeout elapsed))))
        #t)))
 
  ;; Mostly unrelated but useful. Recursively convert all hash-tables to alist
