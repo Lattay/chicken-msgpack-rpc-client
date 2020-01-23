@@ -187,7 +187,7 @@
              ((wait) wait)
              ((bind) bind)
              ((listen) listen)
-             ((pooll-calls) poll-calls)
+             ((poll-calls) poll-calls)
              ((debug)
               (list (cons 'req (hash-table->alist req-table))
                     (cons 'methods (hash-table->alist method-table))
@@ -313,7 +313,7 @@
  ;; no more server-to-client requests are waiting or when timeout second
  ;; (optional, default 0) ; are elapsed
  ;; If timeout is 0, treat one waiting request (if any) and return
- ;; return #f if stopped from timeout and #f if stopped from exaustion
+ ;; return #f if stopped from timeout and #t if stopped from exaustion
  (define (client-listen! client #!optional (timeout 0))
    (let ((start (timestamp)))
      (%read-all! client)
