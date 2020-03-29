@@ -12,28 +12,32 @@
 
   (define (raise-corrupted content)
     (signal
-      (condition 
+      (condition
         `(exn location msgpack message ,(format "Corrupted message ~A." content))
         '(rpc)
         '(invalid))))
 
   (define (make-message vec)
-    (if (not (vector? vec))
-        (raise-corrupted vec))
-    (case (vector-ref vec 0)
-      ((0) ; 0 id method-name params
-       (if (= (vector-length vec) 4)
-           (cons 'request (cdr (vector->list vec)))
-           (raise-corrupted vec)))
-      ((1) ; 1 id error-obj result
-       (if (= (vector-length vec) 4)
-           (cons 'response (cdr (vector->list vec)))
-           (raise-corrupted vec)))
-      ((2) ; 2 method-name params
-       (if (= (vector-length vec) 3)
-           (cons 'notification (cdr (vector->list vec)))
-           (raise-corrupted vec)))
-      (else #f)))
+    (if (eof-object? vec)
+        #f
+        (begin
+          (when (not (vector? vec))
+            (raise-corrupted vec))
+          (case (vector-ref vec 0)
+            ((0) ; 0 id method-name params
+             (if (= (vector-length vec) 4)
+                 (cons 'request (cdr (vector->list vec)))
+                 (raise-corrupted vec)))
+            ((1) ; 1 id error-obj result
+             (if (= (vector-length vec) 4)
+                 (cons 'response (cdr (vector->list vec)))
+                 (raise-corrupted vec)))
+            ((2) ; 2 method-name params
+             (if (= (vector-length vec) 3)
+                 (cons 'notification (cdr (vector->list vec)))
+                 (raise-corrupted vec)))
+            (else ; anything else is wrong
+              (raise-corrupted vec))))))
 
   ;;;;;;;;;;; Public interface
 

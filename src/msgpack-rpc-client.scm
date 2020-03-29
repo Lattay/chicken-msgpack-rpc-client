@@ -1,21 +1,20 @@
 (include "src/mrpc-protocol.scm")
 
 (module msgpack-rpc-client (*wait-cycle-length*
-                           *multi-thread*
+                            *multi-thread*
 
-                           make-client
-                           client?
-                           connect!
-                           close!
-                           call!
-                           async-call!
-                           wait!
-                           notify!
-                           bind!
-                           client-listen!
+                            make-client
+                            client?
+                            connect!
+                            close!
+                            call!
+                            async-call!
+                            wait!
+                            notify!
+                            bind!
+                            listen!
 
-                           untangle-msg
-                           )
+                            untangle-msg)
  (import scheme
          chicken.base
          chicken.tcp
@@ -56,48 +55,49 @@
                      (with-lock id-lock
                                 (set! id (modulo (add1 id) 65536))
                                 id)))))
-     (let ((listen
+     (let ((listen  ; check for pending messages and dispatch *one* of them (if any)
              (lambda ()
                (if (and
                      (input-port-open? in)
                      (char-ready? in))
                    (let ((msg (with-lock in-lock (mrpc:read-message in))))
-                     (when msg
-                       (case (car msg)
-                         ((request)
-                          (let ((id (second msg))
-                                (method-name (third msg))
-                                (args (fourth msg)))
-                            (with-lock method-call-lock
-                                       (set! method-call-stack
-                                         (cons
-                                           (list
-                                             method-name
-                                             args
-                                             (lambda (res err)
-                                               (with-lock out-lock
-                                                          (if err
-                                                              (mrpc:write-response out id method-name err #f)
-                                                              (mrpc:write-response out id method-name #f res)))))
-                                           method-call-stack)))))
-                         ((response)
-                          (let ((id (second msg))
-                                (err (third msg))
-                                (result (fourth msg)))
-                            (with-lock req-table-lock
-                                       (hash-table-set! req-table id
-                                                   (if (null? err)
-                                                       (cons 'success result)
-                                                       (cons 'error err))))))
-                         ((notification)
-                          (let ((method-name (second msg))
-                                (args (third msg)))
-                            (with-lock method-call-lock
-                                       (set! method-call-stack
-                                         (cons
-                                           (list method-name args #f)
-                                           method-call-stack)))))
-                         (else (error "unrecognized message type")))) ; TODO
+                     (if (not msg)
+                         (close-input-port in) ; end of file
+                         (case (car msg)
+                           ((request)  ; requests are pushed onto method-call-stack
+                            (let ((id (second msg))
+                                  (method-name (third msg))
+                                  (args (fourth msg)))
+                              (with-lock method-call-lock
+                                         (set! method-call-stack
+                                           (cons
+                                             (list
+                                               method-name  ; method to be called
+                                               args  ; parameters
+                                               (lambda (res err)  ; response callback
+                                                 (with-lock out-lock
+                                                            (if err
+                                                                (mrpc:write-response out id method-name err #f)
+                                                                (mrpc:write-response out id method-name #f res)))))
+                                             method-call-stack)))))
+                           ((notification)  ; notification are pushed onto method-call-stack
+                            (let ((method-name (second msg))
+                                  (args (third msg)))
+                              (with-lock method-call-lock
+                                         (set! method-call-stack
+                                           (cons
+                                             (list method-name args #f)
+                                             method-call-stack)))))
+                           ((response)  ; response are stored in req-table to be waited
+                            (let ((id (second msg))
+                                  (err (third msg))
+                                  (result (fourth msg)))
+                              (with-lock req-table-lock
+                                         (hash-table-set! req-table id
+                                                          (if (null? err)
+                                                              (cons 'success result)
+                                                              (cons 'error err))))))
+                           (else (error "unrecognized message type")))) ; TODO
                      #t)  ; a message was received
                    #f)))) ; no message was received
        (let ((connect #f)
@@ -107,7 +107,7 @@
                             (close-input-port in))
                  (with-lock out-lock
                             (close-output-port out))))
-             (call
+             (call  ; send a request or notification and return the id
                (lambda (mode method args)
                  (with-lock out-lock
                             (case mode
@@ -117,10 +117,12 @@
                                  id))
                               ((notification)
                                (mrpc:write-notification out method args))))))
-             (wait
+             (wait  ; wait for the response to a specific request
                (lambda (key timeout)
                  (let ((start (timestamp)))
                    (let wait-for-it ()
+                     ; either get the result from the req-table
+                     ; or listen for a while and recurse
                      (or (with-lock req-table-lock
                                     (let ((res (hash-table-ref/default req-table key #f)))
                                       (hash-table-delete! req-table key)
@@ -134,28 +136,28 @@
                                      (repeat)))
                                  (sleep-til! (+ (*wait-cycle-length*) t))
                                  (wait-for-it)))))))))
-             (bind
+             (bind  ; register a method
                (lambda (method-name method)
                  (alist-set! method-name method method-table)))
-             (poll-calls
+             (handle-s2c  ; take a method-call from method-call-stack (if any),
+                          ; run it and (eventually) send the response to server
                (lambda ()
                  (mutex-lock! method-call-lock)
                  (if (null? method-call-stack)
-                     (begin
+                     (begin  ; no more s2c pending
                        (mutex-unlock! method-call-lock)
-                       #f)
-                     (let ((req (car method-call-stack)))
-                       (set! method-call-stack (cdr method-call-stack))
-                       (mutex-unlock! method-call-stack)
+                       #f)  ; return #f when the stack is empty
+                     (let ((req (car method-call-stack)))  ; first method pending
+                       (set! method-call-stack (cdr method-call-stack))  ; pop it
+                       (mutex-unlock! method-call-lock)
                        (let ((res #f) (err #f))
-                         (condition-case
+                         (condition-case  ; run the method in controlled env
                            (set! res (apply (hash-table-ref method-table (first req))
                                             (second req)))
-                           (e ()
-                              (set! err (serialize-exception e))))
-                         (when (third req)
+                           (e () (set! err (serialize-exception e))))
+                         (when (third req)  ; send the result to server
                            ((third req) res err)))
-                       #t)))))
+                       #t)))))  ; return #t when a method have been handled
          (case mode
            ((tcp)
             (assert (= (length args) 2))
@@ -167,6 +169,12 @@
                     (set! in l-in)
                     (set! out l-out)
                     #t)))))
+           ((stdio)
+            (set! connect
+              (lambda ()
+                (set! in (current-input-port))
+                (set! out (current-output-port))
+                #t)))
            ((file)
             )
            ((extend)
@@ -187,7 +195,7 @@
              ((wait) wait)
              ((bind) bind)
              ((listen) listen)
-             ((poll-calls) poll-calls)
+             ((handle-s2c) handle-s2c)
              ((debug)
               (list (cons 'req (hash-table->alist req-table))
                     (cons 'methods (hash-table->alist method-table))
@@ -199,7 +207,7 @@
  (define (%read-all! client)
    (when ((client 'listen))  ; messages incoming
      (%read-all! client)))
- 
+
  ;; internal async call
  (define (%call! client mode method args)
    (%read-all! client)
@@ -307,23 +315,31 @@
  ;; bind a procedure to a method-name to be called by server
  ;; any uncaught error will be reported to the server
  (define (bind! client method-name method)
+   (assert (client? client))
    ((client 'bind) method-name method))
 
- ;; block the current thread to treat server-to-client requests and return when
- ;; no more server-to-client requests are waiting or when timeout second
+ ;; block the current thread to fetch server-to-client messages and return when
+ ;; no more server-to-client messages are waiting or when timeout second
  ;; (optional, default 0) ; are elapsed
- ;; If timeout is 0, treat one waiting request (if any) and return
+ ;; If timeout is 0, treat one waiting message (if any) and return
  ;; return #f if stopped from timeout and #t if stopped from exaustion
- (define (client-listen! client #!optional (timeout 0))
-   (let ((start (timestamp)))
-     (%read-all! client)
-     (if ((client 'listen))
-       (let ((elapsed (- (timestamp) start)))
-         (if (and (> timeout 0)
-                  (> elapsed timeout))
-             #f
-             (client-listen! client (- timeout elapsed))))
-       #t)))
+ ;; If optional handle-call is #t (default is #f) also run methods upon server
+ ;; requests and notifications.
+ (define (listen! client #!optional (handle-call #f) (timeout 0))
+   (assert (client? client))
+   (if (< timeout 0)
+       #f
+       (let ((start (timestamp)))
+         (%read-all! client)
+         (if (or ((client 'listen))
+                 (if handle-call ((client 'handle-s2c)) #f))
+             (let ()
+               (let ((elapsed (- (timestamp) start)))
+                 (if (and (> timeout 0)
+                          (> elapsed timeout))
+                     #f
+                     (listen! client (- timeout elapsed)))))
+             #t))))
 
  ;; Mostly unrelated but useful. Recursively convert all hash-tables to alist
  ;; and vectors to list so that message can be easily displayed and browsed.

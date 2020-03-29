@@ -25,6 +25,9 @@ class MyServicer:
     async def i_dont_know(self, a, b, c):
         return None
 
+    async def call_me_back(self, name):
+        return None
+
     async def dont_call_me(self):
         raise Exception('Don\'t call me !')
 

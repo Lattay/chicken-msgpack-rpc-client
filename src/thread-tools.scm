@@ -2,7 +2,7 @@
 
 (define (timestamp)
   (time->seconds (current-time)))
-  
+
 (define (sleep-til! time)
   (thread-sleep! (- time (timestamp))))
 
@@ -22,4 +22,3 @@
             (begin
               (mutex-unlock! lock)
               (raise e))))))))
-
