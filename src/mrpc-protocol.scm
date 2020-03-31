@@ -54,7 +54,7 @@
   (define (write-response port id method-name error-obj result)
     (assert (and 'write-notification (integer? id)))
     (assert (and 'write-notification (output-port? port) (output-port-open? port)))
-    (mpk:pack port (list 1 id method-name error-obj result)))
+    (mpk:pack port (list 1 id error-obj result)))
 
   ; reader
   (define (read-message port)

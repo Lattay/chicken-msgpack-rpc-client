@@ -18,26 +18,37 @@
  (import scheme
          chicken.base
          chicken.tcp
-         chicken.condition)
+         chicken.condition
+         chicken.format)
 
  (import srfi-1
-         srfi-69)
+         srfi-69
+         mailbox)
 
  (include "src/thread-tools.scm")
 
  (import (prefix mrpc-protocol mrpc:))
 
- (define-syntax alist-set!
-   (syntax-rules ()
-     ((_ alist key val)
-      (set! alist (alist-cons key val alist)))))
-
- (define *wait-cycle-length* (make-parameter 0.05))
+ (define *wait-cycle-length* (make-parameter 0.01))
  (define *multi-thread* (make-parameter #f))
 
+ (define (make-error type msg)
+   (case type
+     ((no-such-method)
+      (list "no-such-method" msg))
+     ((app)
+      (list "app-error" msg))
+     (else
+       (list "error" msg))))
+
+ (define get-message (condition-property-accessor 'exn 'message))
+ (define get-location (condition-property-accessor 'exn 'location))
  (define (serialize-exception exn)
    ; TODO
-   (list "error" "error serialization not implemented yet"))
+   (make-error
+     'app
+     (format "~A: ~A" (get-location exn) (get-message exn))))
+
 
  (define (make-client mode . args)
    (let ((in #f)
@@ -47,8 +58,7 @@
          (req-table (make-hash-table))
          (req-table-lock (make-mutex))
          (method-table (make-hash-table))
-         (method-call-stack '())
-         (method-call-lock (make-mutex))
+         (method-call-stack (make-mailbox))
          (gen-id (let ((id-lock (make-mutex))
                        (id 0))
                    (lambda ()
@@ -67,27 +77,22 @@
                            ((request)  ; requests are pushed onto method-call-stack
                             (let ((id (second msg))
                                   (method-name (third msg))
-                                  (args (fourth msg)))
-                              (with-lock method-call-lock
-                                         (set! method-call-stack
-                                           (cons
-                                             (list
-                                               method-name  ; method to be called
-                                               args  ; parameters
-                                               (lambda (res err)  ; response callback
-                                                 (with-lock out-lock
-                                                            (if err
-                                                                (mrpc:write-response out id method-name err #f)
-                                                                (mrpc:write-response out id method-name #f res)))))
-                                             method-call-stack)))))
+                                  (args (vector->list (fourth msg))))
+                              (mailbox-send!
+                                method-call-stack
+                                (list method-name  ; method to be called
+                                      args  ; parameters
+                                      (lambda (res err)  ; response callback
+                                        (with-lock out-lock
+                                                   (if err
+                                                       (mrpc:write-response
+                                                         out id method-name err #f)
+                                                       (mrpc:write-response
+                                                         out id method-name #f res))))))))
                            ((notification)  ; notification are pushed onto method-call-stack
                             (let ((method-name (second msg))
-                                  (args (third msg)))
-                              (with-lock method-call-lock
-                                         (set! method-call-stack
-                                           (cons
-                                             (list method-name args #f)
-                                             method-call-stack)))))
+                                  (args (vector->list (third msg))))
+                              (mailbox-send! method-call-stack (list method-name args #f))))
                            ((response)  ; response are stored in req-table to be waited
                             (let ((id (second msg))
                                   (err (third msg))
@@ -128,35 +133,34 @@
                                       (hash-table-delete! req-table key)
                                       res))
                          (let ((t (timestamp)))
-                           (if (>= (- t start) timeout 0)
-                               #f
+                           (if (or (not timeout) (< (- t start) timeout))
                                (begin
                                  (let repeat () ; read all available messages
                                    (when (listen)
                                      (repeat)))
                                  (sleep-til! (+ (*wait-cycle-length*) t))
-                                 (wait-for-it)))))))))
+                                 (wait-for-it))
+                               #f)))))))
              (bind  ; register a method
                (lambda (method-name method)
-                 (alist-set! method-name method method-table)))
+                 (hash-table-set! method-table method-name method)))
              (handle-s2c  ; take a method-call from method-call-stack (if any),
-                          ; run it and (eventually) send the response to server
-               (lambda ()
-                 (mutex-lock! method-call-lock)
-                 (if (null? method-call-stack)
-                     (begin  ; no more s2c pending
-                       (mutex-unlock! method-call-lock)
-                       #f)  ; return #f when the stack is empty
-                     (let ((req (car method-call-stack)))  ; first method pending
-                       (set! method-call-stack (cdr method-call-stack))  ; pop it
-                       (mutex-unlock! method-call-lock)
-                       (let ((res #f) (err #f))
-                         (condition-case  ; run the method in controlled env
-                           (set! res (apply (hash-table-ref method-table (first req))
-                                            (second req)))
-                           (e () (set! err (serialize-exception e))))
-                         (when (third req)  ; send the result to server
-                           ((third req) res err)))
+               ; run it and (eventually) send the response to server
+               (lambda (#!optional (blocking #f))
+                 (if (and (not blocking) (mailbox-empty? method-call-stack))
+                     #f  ; no more s2c pending
+                     (let ((req (mailbox-receive! method-call-stack)))  ; first method pending
+                       (let ((func (first req))
+                             (args (second req))
+                             (respond (third req))
+                             (res #f) (err #f))
+                         (if (hash-table-exists? method-table func)
+                             (condition-case  ; run the method in controlled env
+                               (set! res (apply (hash-table-ref method-table func) args))
+                               (e () (set! err (serialize-exception e))))
+                             (set! err (make-error 'no-such-method func)))
+                         (when respond  ; send the result to server
+                           (respond res err)))
                        #t)))))  ; return #t when a method have been handled
          (case mode
            ((tcp)
@@ -204,19 +208,33 @@
 
 
  ;; internal "read all incoming messages"
- (define (%read-all! client)
-   (when ((client 'listen))  ; messages incoming
-     (%read-all! client)))
+ ;; if timeout is provided it will stop when timeout seconds
+ ;; have been elapsed
+ ;; return #t when it stop from exhaustion
+ ;; return #f when it stop from timeout
+ (define (%read-all! client #!optional (timeout #f))
+   (if timeout
+       (if (> timeout 0)
+           (let ((start (timestamp)))
+             (if ((client 'listen))
+                 (let ((elapsed (- (timestamp) start)))
+                   (%read-all! client (- timeout elapsed)))
+                 #t))
+           #f)
+       (if ((client 'listen))  ; messages incoming
+           (%read-all! client)
+           #t)))
 
  ;; internal async call
  (define (%call! client mode method args)
-   (%read-all! client)
    ((client 'call) mode method args))
 
  ;; internal wait
- (define (%wait! client key #!optional (timeout -1))
+ (define (%wait! client key #!optional (timeout #f))
    (let ((res ((client 'wait) key timeout)))
-     (values (cdr res) (car res))))
+     (if res
+      (values (cdr res) (car res))
+      (values #f 'timeout))))
 
  ;; client predicate
  (define (client? client)
@@ -265,49 +283,72 @@
                     (let-values (((result status) (%wait! client key)))
                       (if (eq? status 'error)
                           (cb #f result)
-                          (cb result #f)))))))
+                          (cb result #f))
+                      #t)))))
           (thread-start! thread)
-          thread))
+          (lambda (timeout)
+            thread)))
        ; callback + singlethread
        ((and cb (not (*multi-thread*)))
-        (lambda ()
-          (let-values (((result status) (%wait! client key)))
-            (if (eq? status 'error)
-                (cb #f result)
-                (cb result #f)))))
+        (lambda (timeout)
+          (lambda ()
+            (let-values (((result status) (%wait! client key timeout)))
+              (when (not (eq? status 'timeout))
+                (if (eq? status 'error)
+                    (cb #f result)
+                    (cb result #f)))
+              (values result status)))))
+
        ; promise + multi-thread
        ((and (not cb) (*multi-thread*))
         (let* ((status #f)
                (result #f)
-               (thread
-                 (make-thread (lambda ()
-                                (let-values (((lresult lstatus) (%wait! client key)))
-                                  (set! status lstatus)
-                                  (set! result lresult))))))
+               (thread (make-thread (lambda ()
+                                      (let-values (((lres lstat) (%wait! client key)))
+                                        (set! status lstat)
+                                        (set! result lres)
+                                        #t)))))
           (thread-start! thread)
-          (delay (begin
-                   (thread-join! thread)
-                   (values result status)))))
+          (lambda (timeout)
+            (delay (if (thread-join! thread timeout #f)
+                       (values result status)
+                       (values #f 'timeout))))))
        ; promise + singlethread
        ((and (not cb) (not (*multi-thread*)))
-        (delay (%wait! client key))))))
+        (lambda (timeout)
+          (delay (%wait! client key timeout)))))))
 
- ;; Block until the completion of a request and eventually return the result
+ ;; Block until the completion of a request or timeout and eventually return the result
  ;; argument is the return value of async-call and can be:
  ;; - a Chicken promise to be forced (promise based call)
  ;; - a started SRFI-18 thread to be joined (callback based call)
  ;; - a standard thunk to be called (callback based call)
+ ;; A specific use of wait! can be to pass it the client instance just to
+ ;; force reading pending messages.
  ;; Anything else cause an error.
  ;; Result is returned only from promise based requests.
  ;; #f is returned for callback based requests.
- (define (wait! to-wait)
-   (cond
-     ((promise? to-wait) (force to-wait))
-     ; callback based call:
-     ((thread? to-wait) (thread-join! to-wait) (values #f #f))
-     ((procedure? to-wait) (to-wait) (values #f #f))
-     (else (error "Not a valid to-be-waited object."))))
+ ;; status may be #f for callback based request, 'timeout if timeout have been reached while
+ ;; waiting, 'error if an error have been raised in the server or 'success.
+ ;; If client is passed, return #t if all available messages have been fetched
+ ;; and #f if timeout have been reached before.
+ ;;
+ ;; If timeout is reached waiting for a callback (multi-thread or not),
+ ;; it can be waited again, whereas promise can be waited only once.
+ ;; Hence avoid using promise style with finite timeout or you will lost results
+ ;; and risk memory leak (filling the pending responses result storage).
+ ;;
+ ;; Do not specify timeout or set it to #f to have infinite blocking.
+ (define (wait! to-wait #!optional (timeout #f))
+   (let ((to-wait (to-wait timeout)))
+     (cond ((promise? to-wait) (force to-wait))
+           ; callback based call:
+           ((thread? to-wait) (if (thread-join! to-wait timeout #f) (values #f #f) (values #f 'timeout)))
+           ((procedure? to-wait) (to-wait) (values #f #f))
+           ((client? to-wait) (%read-all! to-wait timeout))
+           (else (error "Not a valid to-be-waited object.")))))
 
+ ;; send a notification to the server and imediatly return
  (define (notify! client method . args)
    (assert (client? client))
    (%call! client 'notification method args))
@@ -318,6 +359,10 @@
    (assert (client? client))
    ((client 'bind) method-name method))
 
+ ;; Non-lazy or
+ (define (or* . args)
+   (foldl (lambda (l r) (or r l)) #f args))
+
  ;; block the current thread to fetch server-to-client messages and return when
  ;; no more server-to-client messages are waiting or when timeout second
  ;; (optional, default 0) ; are elapsed
@@ -325,20 +370,14 @@
  ;; return #f if stopped from timeout and #t if stopped from exaustion
  ;; If optional handle-call is #t (default is #f) also run methods upon server
  ;; requests and notifications.
- (define (listen! client #!optional (handle-call #f) (timeout 0))
+ (define (listen! client #!optional (blocking #f) (timeout #f))
    (assert (client? client))
-   (if (< timeout 0)
+   (if (and timeout (< timeout 0))
        #f
        (let ((start (timestamp)))
-         (%read-all! client)
-         (if (or ((client 'listen))
-                 (if handle-call ((client 'handle-s2c)) #f))
-             (let ()
-               (let ((elapsed (- (timestamp) start)))
-                 (if (and (> timeout 0)
-                          (> elapsed timeout))
-                     #f
-                     (listen! client (- timeout elapsed)))))
+         (%read-all! client (if timeout (/ timeout 2) #f))  ; fetch pending messages until exhaustion (or timeout)
+         (if ((client 'handle-s2c) blocking)
+             (listen! client (- timeout (- (timestamp) start)))
              #t))))
 
  ;; Mostly unrelated but useful. Recursively convert all hash-tables to alist
