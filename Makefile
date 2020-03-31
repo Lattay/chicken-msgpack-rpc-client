@@ -10,13 +10,11 @@ endif
 
 CSC_OPTIONS=
 
-.PHONY: all unit test integration clean
+SRC=$(wildcard src/*.scm)
+
+.PHONY: all unit test integration install clean
 
 all: msgpack-rpc-client.so
-
-install: all
-	chicken-install
-	make clean
 
 help:
 	@echo "Usage: make [PREFIX=<chicken installation prefix>] [CSC=<csc command name>] <target>"
@@ -38,9 +36,18 @@ test: integration unit
 
 unit:
 
-integration: test/tests.scm msgpack-rpc-client.so
+integration: test/tests.scm install
 	$(CSC) $(CSC_OPTIONS) $< -o run-test
 	./run-test
+
+stdio: test/stdio-s2c.scm test/pseudo-server.scm install
+	$(CSC) $(CSC_OPTIONS) test/stdio-s2c.scm -o run-test1
+	$(CSC) $(CSC_OPTIONS) test/pseudo-server.scm -o run-test2
+	ncat -l -p8000 -c ./run-test1
+
+install: $(SRC)
+	chicken-install
+	make clean
 
 msgpack-rpc-client.so: src/msgpack-rpc-client.scm
 	$(CSC) $(CSC_OPTIONS) -s -j msgpack-rpc-client -o $@ $<

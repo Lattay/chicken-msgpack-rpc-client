@@ -4,7 +4,6 @@
 
 (import srfi-18)
 
-(load "msgpack-rpc-client.so")
 (import (prefix msgpack-rpc-client mrpc:))
 
 (define tcp-port (+ 9000 (pseudo-random-integer 999)))
