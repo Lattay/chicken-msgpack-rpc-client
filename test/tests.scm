@@ -26,8 +26,8 @@
   (test-group "initialization"
     (test "tcp params" #t
           (mrpc:client?  (mrpc:make-client 'tcp "localhost" tcp-port)))
-    ; (test "file IO params" #t
-    ;       (mrpc:client? (make-client 'file "/tmp/mrpc:io-file")))
+    (test "unix params" #t
+          (mrpc:client? (make-client 'unix "/tmp/mpackrpc-sk")))
     )
 
   (test-group "tcp usage"

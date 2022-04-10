@@ -23,7 +23,8 @@
 
  (import srfi-1
          srfi-69
-         mailbox)
+         mailbox
+         socket)
 
  (include "src/thread-tools.scm")
 
@@ -173,14 +174,19 @@
                     (set! in l-in)
                     (set! out l-out)
                     #t)))))
-           ((stdio)
-            (set! connect
-              (lambda ()
-                (set! in (current-input-port))
-                (set! out (current-output-port))
-                #t)))
-           ((file)
-            )
+           ((unix)
+            (assert (= (length args) 2))
+            (let ((path (first args)))
+              (set! connect
+                (lambda ()
+                  (let ((sock (socket-connect
+                                (socket af/unix
+                                        sock/stream))))
+                    (socket-connect sock (unix-address path))
+                    (let-values (((s-in s-o) (socket-i/o-ports sock)))
+                      (set! in s-in)
+                      (set! out s-out)
+                      ))))))
            ((extend)
             (assert (= (length args) 1))
             (set! connect

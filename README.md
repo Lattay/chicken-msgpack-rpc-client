@@ -15,7 +15,7 @@ It aims at providing an Lispy interface to this protocol with support of asyncro
 - [x] thread-safe operations
 - [x] server-to-client requests and notifications
 - [x] transport over TCP/IPv4
-- [ ] transport throught FIFO files
+- [ ] transport over Unix socket
 - [ ] transport over other channels through an extension interface
 - [ ] testing
     - [ ] transport
