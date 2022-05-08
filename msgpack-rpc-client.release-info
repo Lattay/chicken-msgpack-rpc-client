@@ -2,3 +2,4 @@
 (uri targz "https://github.com/Lattay/chicken-msgpack-rpc-client/archive/v{egg-release}.tar.gz")
 (release "0.1.0")
 (release "0.1.1")
+(release "0.2.0")
