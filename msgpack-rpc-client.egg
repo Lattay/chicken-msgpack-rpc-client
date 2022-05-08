@@ -1,9 +1,9 @@
 ((license "MIT")
  (category network)
- (dependencies msgpack)
+ (dependencies msgpack socket srfi-69 srfi-1)
  (test-dependencies test)
  (author "Théo Cavignac")
- (version "0.1.1")
+ (version "0.1.2")
  (synopsis "Client for the msgpackRPC protocol for CHICKEN")
  (components 
     (extension msgpack-rpc-client

@@ -1,6 +1,7 @@
 (import test)
 (import chicken.process
-        chicken.random)
+        chicken.random
+        chicken.format)
 
 (import srfi-18)
 
@@ -11,7 +12,7 @@
 (display tcp-port)
 (newline)
 
-(define unix-sock-path "/tmp/msgpack-unix-sock")
+(define unix-sock-path (format "/tmp/msgpack-unix-sock-~a" tcp-port))
 (display "socket used ")
 (display unix-sock-path)
 (newline)
@@ -25,7 +26,7 @@
      (let ((pid (pythoncmd "test/tcp-mpack-server.py" (number->string tcp-port))))
        (lambda () (process-run (string-append "kill -15 " (number->string pid))))))
     ((#:unix)
-     (let ((pid (pythoncmd "test/unix-mpack-server.py" (number->string unix-sock-path))))
+     (let ((pid (pythoncmd "test/unix-mpack-server.py" unix-sock-path)))
        (lambda () (process-run (string-append "kill -15 " (number->string pid))))))
     (else
       (error "Not implemented yet."))))
@@ -35,8 +36,7 @@
     (test "tcp params" #t
           (mrpc:client?  (mrpc:make-client #:tcp "127.0.0.1" tcp-port)))
     (test "unix params" #t
-          (mrpc:client? (mrpc:make-client #:unix "/tmp/mpackrpc-sk")))
-    )
+          (mrpc:client? (mrpc:make-client #:unix "/tmp/mpackrpc-sk"))))
 
   (test-group "tcp usage"
     (define stop-srv (start-external-server #:tcp "127.0.0.1" tcp-port))
@@ -71,18 +71,19 @@
     (test-group "edge cases"
       (test "empty arg list" 42 (mrpc:call! client "answer"))
       (test "null result" '() (mrpc:call! client "i_dont_know" 1 2 3))
-      (test "call raise error" 'error
+      (test "call raise error" #:error
             (let-values (((result status) (mrpc:call! client "dont_call_me" 1 2 3)))
               status))
-      (test "method does not exist" 'error
+      (test "method does not exist" #:error
             (let-values (((result status) (mrpc:call! client "does_not_exists" 3)))
               status))
       )
 
     ; (test-group "s2c"
-    ;   (test "call me back" 0
-    ;         (let ((ok (make-parameter #f)))
-    ;           (mrpc:bind! client "pouet" (lambda () (ok #t)))
+    ;   (test "call me back" 2
+    ;         (let ((ok (make-parameter 0)))
+    ;           (mrpc:bind! client "pouet" (lambda () (ok (+ (ok) 1))))
+    ;           (mrpc:notify! client "call_me_back" "pouet")
     ;           (mrpc:notify! client "call_me_back" "pouet")
     ;           (mrpc:listen! client #t 1)
     ;           (ok))
@@ -117,23 +118,23 @@
                                                   (set! val err)
                                                   (set! val res))))))
                 (thread-sleep! 0.5)
-                val)))
-      )
+                val))))
     (test-group "edge cases"
       (test "empty arg list" 42 (mrpc:call! client "answer"))
       (test "null result" '() (mrpc:call! client "i_dont_know" 1 2 3))
-      (test "call raise error" 'error
+      (test "call raise error" #:error
             (let-values (((result status) (mrpc:call! client "dont_call_me" 1 2 3)))
               status))
-      (test "method does not exist" 'error
+      (test "method does not exist" #:error
             (let-values (((result status) (mrpc:call! client "does_not_exists" 3)))
               status))
       )
 
     ; (test-group "s2c"
-    ;   (test "call me back" 0
-    ;         (let ((ok (make-parameter #f)))
-    ;           (mrpc:bind! client "pouet" (lambda () (ok #t)))
+    ;   (test "call me back" 2
+    ;         (let ((ok (make-parameter 0)))
+    ;           (mrpc:bind! client "pouet" (lambda () (ok (+ (ok) 1))))
+    ;           (mrpc:notify! client "call_me_back" "pouet")
     ;           (mrpc:notify! client "call_me_back" "pouet")
     ;           (mrpc:listen! client #t 1)
     ;           (ok))

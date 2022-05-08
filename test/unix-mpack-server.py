@@ -1,12 +1,14 @@
-import asyncio
 import sys
+import socket
+import asyncio
 import aio_msgpack_rpc
 
 
 try:
-    path = int(sys.argv[1])
+    path = sys.argv[1]
 except Exception:
-    path = "/tmp/test-socket"
+    print("No socket path provided.")
+    exit(1)
 
 
 # handlers can be defined on a class
@@ -33,10 +35,13 @@ class MyServicer:
 
 
 async def main():
+    sock = socket.socket(family=socket.AF_UNIX, type=socket.SOCK_STREAM)
+    sock.bind(path)
+
     try:
         server = await asyncio.start_server(
             aio_msgpack_rpc.Server(MyServicer()),
-            socket=path,
+            sock=sock,
         )
 
         while True:
@@ -45,6 +50,6 @@ async def main():
         server.close()
 
 try:
-    asyncio.get_event_loop().run_until_complete(main())
+    asyncio.new_event_loop().run_until_complete(main())
 except KeyboardInterrupt:
     pass
