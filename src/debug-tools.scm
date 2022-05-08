@@ -9,5 +9,5 @@
   (syntax-rules ()
     ((_ port)
      (begin
-       (define cl (make-mrpc-client 'tcp "localhost" port))
+       (define cl (make-mrpc-client 'tcp "127.0.0.1" port))
        (mrpc-connect! cl)))))
