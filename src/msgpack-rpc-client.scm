@@ -75,7 +75,7 @@
                      (if (not msg)
                          (close-input-port in) ; end of file
                          (case (car msg)
-                           ((request)  ; requests are pushed onto method-call-stack
+                           ((#:request)  ; requests are pushed onto method-call-stack
                             (let ((id (second msg))
                                   (method-name (third msg))
                                   (args (vector->list (fourth msg))))
@@ -90,19 +90,19 @@
                                                          out id method-name err #f)
                                                        (mrpc:write-response
                                                          out id method-name #f res))))))))
-                           ((notification)  ; notification are pushed onto method-call-stack
+                           ((#:notification)  ; notification are pushed onto method-call-stack
                             (let ((method-name (second msg))
                                   (args (vector->list (third msg))))
                               (mailbox-send! method-call-stack (list method-name args #f))))
-                           ((response)  ; response are stored in req-table to be waited
+                           ((#:response)  ; response are stored in req-table to be waited
                             (let ((id (second msg))
                                   (err (third msg))
                                   (result (fourth msg)))
                               (with-lock req-table-lock
                                          (hash-table-set! req-table id
                                                           (if (null? err)
-                                                              (cons 'success result)
-                                                              (cons 'error err))))))
+                                                              (cons #:success result)
+                                                              (cons #:error err))))))
                            (else (error "unrecognized message type")))) ; TODO
                      #t)  ; a message was received
                    #f)))) ; no message was received
@@ -117,11 +117,11 @@
                (lambda (mode method args)
                  (with-lock out-lock
                             (case mode
-                              ((request)
+                              ((#:request)
                                (let ((id (gen-id)))
                                  (mrpc:write-request out id method args)
                                  id))
-                              ((notification)
+                              ((#:notification)
                                (mrpc:write-notification out method args))))))
              (wait  ; wait for the response to a specific request
                (lambda (key timeout)
@@ -164,7 +164,7 @@
                            (respond res err)))
                        #t)))))  ; return #t when a method have been handled
          (case mode
-           ((tcp)
+           ((#:tcp)
             (assert (= (length args) 2))
             (let ((host (first args))
                   (port (second args)))
@@ -174,8 +174,8 @@
                     (set! in l-in)
                     (set! out l-out)
                     #t)))))
-           ((unix)
-            (assert (= (length args) 2))
+           ((#:unix)
+            (assert (= (length args) 1))
             (let ((path (first args)))
               (set! connect
                 (lambda ()
@@ -183,11 +183,11 @@
                                 (socket af/unix
                                         sock/stream))))
                     (socket-connect sock (unix-address path))
-                    (let-values (((s-in s-o) (socket-i/o-ports sock)))
+                    (let-values (((s-in s-out) (socket-i/o-ports sock)))
                       (set! in s-in)
                       (set! out s-out)
-                      ))))))
-           ((extend)
+                      #t))))))
+           ((#:extend)
             (assert (= (length args) 1))
             (set! connect
               (lambda ()
@@ -198,18 +198,18 @@
              (error "Unsupported transport mode.")))
          (lambda (method)
            (case method
-             ((is-mrpc-client) #t)
-             ((connect) connect)
-             ((close) close)
-             ((call) call)
-             ((wait) wait)
-             ((bind) bind)
-             ((listen) listen)
-             ((handle-s2c) handle-s2c)
-             ((debug)
-              (list (cons 'req (hash-table->alist req-table))
-                    (cons 'methods (hash-table->alist method-table))
-                    (cons 'call-stack method-call-stack)))
+             ((#:is-mrpc-client) #t)
+             ((#:connect) connect)
+             ((#:close) close)
+             ((#:call) call)
+             ((#:wait) wait)
+             ((#:bind) bind)
+             ((#:listen) listen)
+             ((#:handle-s2c) handle-s2c)
+             ((#:debug)
+              (list (cons #:req (hash-table->alist req-table))
+                    (cons #:methods (hash-table->alist method-table))
+                    (cons #:call-stack method-call-stack)))
              (else #f)))))))
 
 
@@ -222,46 +222,46 @@
    (if timeout
        (if (> timeout 0)
            (let ((start (timestamp)))
-             (if ((client 'listen))
+             (if ((client #:listen))
                  (let ((elapsed (- (timestamp) start)))
                    (%read-all! client (- timeout elapsed)))
                  #t))
            #f)
-       (if ((client 'listen))  ; messages incoming
+       (if ((client #:listen))  ; messages incoming
            (%read-all! client)
            #t)))
 
  ;; internal async call
  (define (%call! client mode method args)
-   ((client 'call) mode method args))
+   ((client #:call) mode method args))
 
  ;; internal wait
  (define (%wait! client key #!optional (timeout #f))
-   (let ((res ((client 'wait) key timeout)))
+   (let ((res ((client #:wait) key timeout)))
      (if res
       (values (cdr res) (car res))
-      (values #f 'timeout))))
+      (values #f #:timeout))))
 
  ;; client predicate
  (define (client? client)
    (and
      (procedure? client)
-     (client 'is-mrpc-client)))
+     (client #:is-mrpc-client)))
 
  ;; connect to the server
  (define (connect! client)
    (assert (client? client))
-   ((client 'connect)))
+   ((client #:connect)))
 
  ;; close the connection
  (define (close! client)
    (assert (client? client))
-   ((client 'close)))
+   ((client #:close)))
 
  ;; synchronously call a remote method and return the result
  (define (call! client method . args)
    (assert (client? client))
-   (%wait! client (%call! client 'request method args)))
+   (%wait! client (%call! client #:resquest method args)))
 
  ;; Asyncronously call a remote method.
  ;; The last argument can be a either a callback procedure or #f.
@@ -278,7 +278,7 @@
    (let* ((rargs (reverse args))
           (cb (car rargs))
           (args (reverse (cdr rargs)))
-          (key (%call! client 'request method args)))
+          (key (%call! client #:request method args)))
      (assert (or (not cb) (procedure? cb)) "Last argument must be either #f or a procedure.")
      (cond
        ; callback + multithread
@@ -287,7 +287,7 @@
                 (make-thread
                   (lambda ()
                     (let-values (((result status) (%wait! client key)))
-                      (if (eq? status 'error)
+                      (if (eq? status #:error)
                           (cb #f result)
                           (cb result #f))
                       #t)))))
@@ -299,8 +299,8 @@
         (lambda (timeout)
           (lambda ()
             (let-values (((result status) (%wait! client key timeout)))
-              (when (not (eq? status 'timeout))
-                (if (eq? status 'error)
+              (when (not (eq? status #:timeout))
+                (if (eq? status #:error)
                     (cb #f result)
                     (cb result #f)))
               (values result status)))))
@@ -318,7 +318,7 @@
           (lambda (timeout)
             (delay (if (thread-join! thread timeout #f)
                        (values result status)
-                       (values #f 'timeout))))))
+                       (values #f #:timeout))))))
        ; promise + singlethread
        ((and (not cb) (not (*multi-thread*)))
         (lambda (timeout)
@@ -334,8 +334,8 @@
  ;; Anything else cause an error.
  ;; Result is returned only from promise based requests.
  ;; #f is returned for callback based requests.
- ;; status may be #f for callback based request, 'timeout if timeout have been reached while
- ;; waiting, 'error if an error have been raised in the server or 'success.
+ ;; status may be #f for callback based request, #:timeout if timeout have been reached while
+ ;; waiting, #:error if an error have been raised in the server or #:success.
  ;; If client is passed, return #t if all available messages have been fetched
  ;; and #f if timeout have been reached before.
  ;;
@@ -349,7 +349,7 @@
    (let ((to-wait (to-wait timeout)))
      (cond ((promise? to-wait) (force to-wait))
            ; callback based call:
-           ((thread? to-wait) (if (thread-join! to-wait timeout #f) (values #f #f) (values #f 'timeout)))
+           ((thread? to-wait) (if (thread-join! to-wait timeout #f) (values #f #f) (values #f #:timeout)))
            ((procedure? to-wait) (to-wait) (values #f #f))
            ((client? to-wait) (%read-all! to-wait timeout))
            (else (error "Not a valid to-be-waited object.")))))
@@ -357,13 +357,13 @@
  ;; send a notification to the server and imediatly return
  (define (notify! client method . args)
    (assert (client? client))
-   (%call! client 'notification method args))
+   (%call! client #:notification method args))
 
  ;; bind a procedure to a method-name to be called by server
  ;; any uncaught error will be reported to the server
  (define (bind! client method-name method)
    (assert (client? client))
-   ((client 'bind) method-name method))
+   ((client #:bind) method-name method))
 
  ;; Non-lazy or
  (define (or* . args)
@@ -382,7 +382,7 @@
        #f
        (let ((start (timestamp)))
          (%read-all! client (if timeout (/ timeout 2) #f))  ; fetch pending messages until exhaustion (or timeout)
-         (if ((client 'handle-s2c) blocking)
+         (if ((client #:handle-s2c) blocking)
              (listen! client (- timeout (- (timestamp) start)))
              #t))))
 
